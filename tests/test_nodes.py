@@ -4,11 +4,16 @@ The client is injected. Nothing in the default path confirms a spend or
 opens a network session.
 """
 
+import base64
+import http.client
 import importlib
+import importlib.metadata
 import importlib.util
 import json
 import os
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -255,7 +260,7 @@ class NodeTests(unittest.TestCase):
                 sys.modules.pop("wan30", None)
             else:
                 sys.modules["wan30"] = saved
-        self.assertIn("not on PyPI yet", str(missing.exception))
+        self.assertIn("Install wan30>=0.1.0,<0.2 from PyPI", str(missing.exception))
 
     def test_open_client_uses_environment_without_a_widget_secret(self):
         calls = {}
@@ -290,12 +295,132 @@ class NodeTests(unittest.TestCase):
         )
         self.assertIn("purchased", text.lower())
         self.assertIn("check-in", text.lower())
-        self.assertIn("not an official", (PACKAGE / "README.md").read_text(encoding="utf-8").lower())
-        self.assertIn("not on PyPI yet", text)
+        readme = (PACKAGE / "README.md").read_text(encoding="utf-8")
+        self.assertIn("not an official", readme.lower())
+        self.assertIn("https://pypi.org/project/wan30/0.1.0/", readme)
+        self.assertNotIn("not on PyPI yet", text)
         self.assertIn('PublisherId = "notusinggithub"', (PACKAGE / "pyproject.toml").read_text())
         self.assertNotRegex(text, r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}")
         ignore = (PACKAGE / ".comfyignore").read_text(encoding="utf-8")
-        self.assertIn("tests/", ignore)
+        for entry in ("tests/", ".github/", "scripts/", "node.zip"):
+            self.assertIn(entry, ignore.splitlines())
+
+    def test_registry_metadata_script(self):
+        completed = subprocess.run(
+            [sys.executable, str(PACKAGE / "scripts" / "check_registry_metadata.py")],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("wan30 0.1.0 registry metadata is valid.", completed.stdout)
+
+    def test_installed_wan30_is_0_1_0(self):
+        self.assertEqual(importlib.metadata.version("wan30"), "0.1.0")
+
+    def test_public_client_uses_mocked_http_and_does_not_spend(self):
+        import wan30.client
+        import wan30.transport
+
+        def fake_jwt():
+            def segment(value):
+                raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+                return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+            header = segment({"alg": "none", "typ": "JWT"})
+            claims = segment(
+                {
+                    "sub": "offline-test",
+                    "grant_id": "offline-grant",
+                    "aud": "https://wan30.video/api/mcp",
+                }
+            )
+            return header + "." + claims + ".sig"
+
+        calls = []
+
+        def fake_request(url, *, method, headers, body=None, timeout, max_bytes):
+            self.assertEqual(url, "https://wan30.video/api/mcp/")
+            self.assertEqual(method, "POST")
+            self.assertTrue(str(headers.get("Authorization", "")).startswith("Bearer "))
+            payload = json.loads(body)
+            tool = None
+            if payload.get("method") == "tools/call":
+                tool = payload["params"]["name"]
+                self.assertNotIn("confirm_spend", json.dumps(payload["params"]["arguments"]))
+            calls.append((payload.get("method"), tool))
+            if payload.get("method") == "notifications/initialized":
+                return wan30.transport.HttpResponse(202, {"content-type": "application/json"}, b"")
+            if payload.get("method") == "initialize":
+                result = {"protocolVersion": "2025-11-25", "capabilities": {}}
+            else:
+                name = payload["params"]["name"]
+                data = {"taskId": "task-mock"} if name == "generate_video" else {"authenticated": True}
+                result = {"structuredContent": {"data": data}, "isError": False}
+            response = {
+                "jsonrpc": "2.0",
+                "id": payload["id"],
+                "result": result,
+            }
+            return wan30.transport.HttpResponse(
+                200,
+                {"content-type": "application/json"},
+                json.dumps(response).encode("utf-8"),
+            )
+
+        def refuse_socket(*args, **kwargs):
+            raise AssertionError("real HTTPS connection")
+
+        saved_env = {
+            name: os.environ.get(name)
+            for name in ("WAN30_ACCESS_TOKEN", "WAN30_CONFIG_DIR", "WAN30_ORIGIN", "HOME")
+        }
+        saved_request = wan30.client.https_request
+        saved_transport = wan30.transport.https_request
+        saved_socket = http.client.HTTPSConnection
+        config = tempfile.TemporaryDirectory()
+        home = tempfile.TemporaryDirectory()
+        try:
+            wan30.client.https_request = fake_request
+            wan30.transport.https_request = fake_request
+            http.client.HTTPSConnection = refuse_socket
+            os.environ["WAN30_ACCESS_TOKEN"] = fake_jwt()
+            os.environ["WAN30_CONFIG_DIR"] = config.name
+            os.environ["HOME"] = home.name
+            os.environ.pop("WAN30_ORIGIN", None)
+            os.environ.pop(nodes.CONFIRM_ENV, None)
+            session.open_client = self.original
+            fields = dict(model_id="wan30-text-to-video", prompt="A paper boat")
+            with self.assertRaises(RuntimeError):
+                nodes.Wan30GenerateVideo().execute(confirm_spend=False, **fields)
+            with self.assertRaises(RuntimeError):
+                nodes.Wan30GenerateVideo().execute(confirm_spend=True, **fields)
+            self.assertEqual(calls, [])
+            account = json.loads(nodes.Wan30AccountStatus().execute()["result"][0])
+            self.assertEqual(account["authenticated"], True)
+            self.assertIn(("tools/call", "account_status"), calls)
+            self.assertNotIn("generate_video", [tool for _method, tool in calls])
+            before = len(calls)
+            os.environ[nodes.CONFIRM_ENV] = nodes.CONFIRM_VALUE
+            generated = nodes.Wan30GenerateVideo().execute(
+                confirm_spend=True,
+                request_id="paper-boat-shot01",
+                **fields,
+            )
+            self.assertEqual(json.loads(generated["result"][0])["taskId"], "task-mock")
+            self.assertIn(("tools/call", "generate_video"), calls[before:])
+            self.assertTrue(any(item[0] == "initialize" for item in calls))
+        finally:
+            wan30.client.https_request = saved_request
+            wan30.transport.https_request = saved_transport
+            http.client.HTTPSConnection = saved_socket
+            config.cleanup()
+            home.cleanup()
+            for name, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
 
 if __name__ == "__main__":

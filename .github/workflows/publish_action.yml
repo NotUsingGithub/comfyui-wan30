@@ -1,0 +1,63 @@
+name: Publish Wan30 to Comfy Registry
+
+# Manual only. This file has no push, tag, pull request, or schedule trigger.
+# Run it from the Actions tab on main after review, and type publish in the
+# publish input. Any other value skips both jobs. Neither job prints the
+# Registry token. The token is not a job output.
+#
+# actions/checkout v7.0.1 is 3d3c42e5aac5ba805825da76410c181273ba90b1.
+# Comfy-Org/publish-node-action main, the file current Comfy docs identify,
+# is d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9 (2025-05-10, signed Comfy-Org merge).
+# GitHub Release 1.0.1 is the older commit 7578cdb0c1410f2515e6f9b1443c6859cab94f05.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Type publish to upload wan30 0.1.0 from main."
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: comfy-registry-wan30
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Check wan30 0.1.0 metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'NotUsingGithub/comfyui-wan30' && github.ref == 'refs/heads/main' && github.event.inputs.publish == 'publish'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check registry metadata
+        run: python3 scripts/check_registry_metadata.py
+
+  publish:
+    name: Publish Custom Node to registry
+    needs: guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'NotUsingGithub/comfyui-wan30' && github.ref == 'refs/heads/main' && github.event.inputs.publish == 'publish'
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Check registry metadata again
+        run: python3 scripts/check_registry_metadata.py
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@d2366e7abb6ab16f3bb03e3520ae25c8cf749bc9
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+          skip_checkout: true

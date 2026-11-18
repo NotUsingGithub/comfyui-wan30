@@ -11,9 +11,8 @@ and gift credits alone do not qualify. Estimation does not spend credits.
 This is not an official Alibaba, DashScope, or Tongyi client. It does not
 generate video on your machine and it does not offer free generation.
 
-The Python dependency `wan30>=0.1.0,<0.2` is **not on PyPI yet**. ComfyUI-Manager
-will fail `pip install -r requirements.txt` until that release exists. Install
-the reviewed wheel first, then install this folder.
+The Python dependency `wan30>=0.1.0,<0.2` is published on PyPI as
+[wan30 0.1.0](https://pypi.org/project/wan30/0.1.0/).
 
 ## Nodes
 
@@ -62,41 +61,33 @@ Clone https://github.com/NotUsingGithub/comfyui-wan30 into
 `ComfyUI/custom_nodes/comfyui-wan30`, or copy this repository so `__init__.py`
 is directly inside that folder. Restart ComfyUI.
 
-`requirements.txt` asks pip for `wan30>=0.1.0,<0.2`. That package is not on
-PyPI yet, so a Manager install still fails at the pip step. Install the
-reviewed wheel first. This repository is not a Comfy Registry listing.
+`requirements.txt` installs `wan30>=0.1.0,<0.2` from PyPI. That requirement
+resolves to wan30 0.1.0.
 
-## Comfy Registry and Manager
+## Comfy Registry
 
-Checked against the current Comfy docs and `comfy-cli`:
+Registry metadata is in `pyproject.toml`. The node id is `wan30`, the version
+is `0.1.0`, and `PublisherId` is `notusinggithub`. The expected listing is
+https://registry.comfy.org/nodes/wan30. This package does not create the
+publisher. The listing is not live until a maintainer dispatches the manual
+workflow from `main`.
 
-- Registry metadata lives in this `pyproject.toml`. The node id is `wan30`.
-  On 2026-11-11, `GET https://api.comfy.org/nodes/wan30` returned 404.
-- `PublisherId` is `notusinggithub`. That publisher id already exists at
-  `https://registry.comfy.org`. This package does not create it. You still
-  need a Registry publishing API key from that publisher. Create the key at
-  the registry while logged in, and keep it outside this repo.
-- `comfy node pack` and `comfy node publish` zip git-tracked files from this
-  repository root (`git -C . ls-files`). `.comfyignore` drops `tests/`.
-- `Comfy-Org/publish-node-action` checks out the repository root and has no
-  subdirectory input. Point it at `NotUsingGithub/comfyui-wan30`, not at
-  `NotUsingGithub/wan30-mcp`. This import does not run that action.
-- Manager installs a registry zip into `custom_nodes/<node-id>/`, then runs
-  `requirements.txt`. Do not open a `custom-node-list.json` pull request.
-  The Registry upload is not done. PyPI package `wan30` is still blocked, and
-  no Registry publishing key is stored in this repository.
+`.github/workflows/publish_action.yml` is manual only. The `publish` input
+must be the word `publish`, the ref must be `main`, and the repository must
+be `NotUsingGithub/comfyui-wan30`. It does not run on a push, a tag, or a
+pull request. The publish job reads the repository Actions secret
+`REGISTRY_ACCESS_TOKEN` and does not print it. The key is not stored in this
+repository.
 
-Publish only after `wan30` is on PyPI and a Registry key exists outside this
-repo. Otherwise Manager installs the node and then fails its dependency. From
-a committed checkout:
+`comfy node pack` zips git-tracked files from this repository root.
+`.comfyignore` drops `tests/`, `scripts/`, `.github/`, and `node.zip`. From a committed
+checkout, before a manual dispatch:
 
 ```sh
 comfy node validate
-comfy node publish
 ```
 
-`comfy node publish` uploads. The API key is prompted, or passed with
-`--token` from a secret store. Do not commit the key. The published version
-is `0.1.0` in `pyproject.toml`.
+Do not commit a Registry key. The published version is `0.1.0` in
+`pyproject.toml`.
 
 Authors recorded here are Wan30 and NotUsingGithub.

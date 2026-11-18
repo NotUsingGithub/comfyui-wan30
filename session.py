@@ -7,8 +7,8 @@ environment. This module does not read `.env` files and does not prompt.
 
 
 _MISSING = (
-    "The wan30 package is not installed. It is not on PyPI yet. "
-    "Install wan30>=0.1.0,<0.2 from the reviewed wheel, then restart ComfyUI."
+    "The wan30 package is not installed. "
+    "Install wan30>=0.1.0,<0.2 from PyPI, then restart ComfyUI."
 )
 
 
